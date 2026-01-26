@@ -15,6 +15,7 @@ st.set_page_config(page_title="Wetter-Dashboard", layout="wide")
 # ortsauswahl
 orte = st.secrets["ort_verzeichnis"]
 
+
 ausgewaehlter_ort = st.sidebar.selectbox("Wähle einen Ort:", list(orte.keys()))
 coords = orte[ausgewaehlter_ort]
 
@@ -38,7 +39,7 @@ def get_weather_data(lat, lon):
         "longitude": lon, 
         "models": "icon_d2",
         "hourly": ["temperature_2m", "relative_humidity_2m", "rain", "wind_speed_10m", "snow_depth", "pressure_msl", 
-                   "wind_direction_10m", "wind_gusts_10m", "soil_temperature_0cm", "snowfall", "shortwave_radiation", "uv_index"],
+                   "wind_direction_10m", "wind_gusts_10m", "soil_temperature_0cm", "snowfall", "shortwave_radiation", "cloud_cover", "is_day"],
         "timezone": "Europe/Berlin",
         "forecast_days": 2,
     }
@@ -65,7 +66,9 @@ def get_weather_data(lat, lon):
         "Bodentemperatur (°C)": hourly.Variables(8).ValuesAsNumpy().round(3),
         "Schneefall (mm)": hourly.Variables(9).ValuesAsNumpy().round(3),
         "Solarstrahlung (W/m2)" : hourly.Variables(10).ValuesAsNumpy().round(3),
-        "UV-Index": hourly.Variables(11).ValuesAsNumpy().round(3)
+        "UV-Index": (hourly.Variables(10).ValuesAsNumpy() / 90).round(1),
+        "Wolkenbedeckung (%)" : hourly.Variables(11).ValuesAsNumpy().round(3),
+        "Tag/Nacht" : hourly.Variables(12).ValuesAsNumpy().round(3)
     }
     return pd.DataFrame(data = hourly_data)
 
@@ -81,6 +84,13 @@ aktueller_index = (df['date'] - jetzt).abs().idxmin()
 
 # daten für genau diesen Zeitpunkt extrahieren
 aktueller_stand = df.loc[aktueller_index]
+
+
+##############################################################################################
+##############################################################################################
+###################### Aktuelle Bedingungen ##################################################
+##############################################################################################
+##############################################################################################
 
 st.write(f"### Aktuelle Bedingungen (Stand: {aktueller_stand['date'].strftime('%H:%M')} Uhr)")
 
@@ -106,6 +116,15 @@ glaette_gefahr = df_zukunft["Bodentemperatur (°C)"].min() <= 0
 uv_gefahr = df_zukunft["UV-Index"].max()
 
 st.write("---")
+
+
+##############################################################################################
+##############################################################################################
+###################### Kurzer Ausblick 48h  ##################################################
+##############################################################################################
+##############################################################################################
+
+
 st.subheader("Ausblick & Warnungen (nächste 48h)")
 
 # icons und texte basierend auf der Logik
@@ -136,26 +155,87 @@ with warn_cols[2]:
         st.success(f"🍃 Kein Sturm, Windgeschwindigkeiten bis {wind_max} km/h erwartet.")
 
 with warn_cols[3]:
-    if uv_gefahr < 3:
-        st.warning(f"☁️ UV-Index unter 3, keine Sonnenbrandgefahr.")
-    elif uv_gefahr >=3 and uv_gefahr <= 5:
-        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
-        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Mäßige Sonnenbrandgefahr.")
-    elif uv_gefahr >=6 and uv_gefahr <= 7:
-        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
-        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Starke Sonnenbrandgefahr!")
-    elif uv_gefahr >=8 and uv_gefahr <= 10:
-        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
-        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Sehr starke Sonnenbrandgefahr!")
-    elif uv_gefahr >10:
-        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
-        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Extreme Sonnenbrandgefahr!")
+    uv_max = float(df_zukunft["UV-Index"].max())
+    
+    if pd.isna(uv_max) or uv_max < 0.1:
+        st.success("🌙 Kein UV-Index (Nacht/Abend).")
+    elif uv_max < 3:
+        st.success(f"☁️ Maximaler UV-Index: {uv_max:.0f}. Keine Gefahr.")
+    elif 3 <= uv_max <= 5:
+        st.warning(f"☀️ UV-Index {uv_max:.0f} (Mäßig). Schutz empfohlen.")
+    elif 6 <= uv_max <= 7:
+        st.warning(f"⚠️ UV-Index {uv_max:.0f} (Hoch). Sonnencreme nutzen!")
+    elif 8 <= uv_max <= 10:
+        st.error(f"🔥 UV-Index {uv_max:.0f} (Sehr hoch). Gefahr!")
+    else:
+        st.error(f"🚫 UV-Index {uv_max:.0f} (Extrem). Schatten suchen!")
 
 st.write("---")
 
 
+##############################################################################################
+##############################################################################################
+###################### 3h Zweitagesausblick ##################################################
+##############################################################################################
+##############################################################################################
+
+# --- 3-STÜNDLICHE VORHERSAGE-LEISTE ---
+st.subheader("Kurzfristiger Zweitagesausblick (dreistündlich)")
+
+# gruppieren der nächsten 36h
+df_resampled = df_zukunft.set_index('date').resample('3h').agg({
+    'Temperatur (°C)': 'mean',
+    'Regen (mm)': 'sum',
+    'Schneefall (mm)': 'sum',
+    'Wolkenbedeckung (%)': 'mean',
+    'Tag/Nacht': 'mean'
+}).head(12)
+
+# erstelle spalten für die symbole
+cols = st.columns(len(df_resampled))
+
+for i, (timestamp, row) in enumerate(df_resampled.iterrows()):
+    with cols[i]:
+        st.write(f"**{timestamp.strftime('%H:%M')}**")
+        
+        wolken = row['Wolkenbedeckung (%)']
+        regen = row['Regen (mm)']
+        schnee = row['Schneefall (mm)']
+        # falls es überwiegend hell ist
+        ist_tag = row['Tag/Nacht'] > 0.5
+
+        # Logik-Hierarchie
+        if schnee > 0.1:
+            icon = "❄️" # Schnee
+        elif regen > 0.5:
+            icon = "🌧️" # Starkregen
+        elif regen > 0.1:
+            # Bei Regen: Mix-Icon nur tagsüber, nachts eher Wolke+Regen
+            icon = "🌦️" if ist_tag else "🌧️"
+        elif wolken > 80:
+            icon = "☁️" # Ganz bedeckt
+        elif wolken > 50:
+            icon = "🌥️" if ist_tag else "☁️" # Wolken dominieren
+        elif wolken > 20:
+            icon = "🌤️" if ist_tag else "☁️" # Leicht bewölkt
+        else:
+            # Klarer Himmel (< 20% Wolken)
+            icon = "☀️" if ist_tag else "🌙"
+
+        st.write(f"## {icon}")
+        st.write(f"{row['Temperatur (°C)']:.0f}°C")
+
+st.write("---")
+
+
+##############################################################################################
+##############################################################################################
+###################### Detaillierte 48h Vorhersage ###########################################
+##############################################################################################
+##############################################################################################
+
 # wettervorhersage für die nächsten 48h
-st.subheader("Wetterverlauf (nächste 48h)")
+st.subheader("Detaillierter Wetterverlauf (nächste 48h)")
 
 # 1. TEMPERATUR & FEUCHTIGKEIT
 fig1 = make_subplots(specs=[[{"secondary_y": True}]])
