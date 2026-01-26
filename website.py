@@ -38,7 +38,7 @@ def get_weather_data(lat, lon):
         "longitude": lon, 
         "models": "icon_d2",
         "hourly": ["temperature_2m", "relative_humidity_2m", "rain", "wind_speed_10m", "snow_depth", "pressure_msl", 
-                   "wind_direction_10m", "wind_gusts_10m", "soil_temperature_0cm", "snowfall"],
+                   "wind_direction_10m", "wind_gusts_10m", "soil_temperature_0cm", "snowfall", "shortwave_radiation", "uv_index"],
         "timezone": "Europe/Berlin",
         "forecast_days": 2,
     }
@@ -63,7 +63,9 @@ def get_weather_data(lat, lon):
         "Windrichtung (°)": hourly.Variables(6).ValuesAsNumpy().round(3),
         "Windböen (km/h)": hourly.Variables(7).ValuesAsNumpy().round(3),
         "Bodentemperatur (°C)": hourly.Variables(8).ValuesAsNumpy().round(3),
-        "Schneefall (mm)": hourly.Variables(9).ValuesAsNumpy().round(3)
+        "Schneefall (mm)": hourly.Variables(9).ValuesAsNumpy().round(3),
+        "Solarstrahlung (W/m2)" : hourly.Variables(10).ValuesAsNumpy().round(3),
+        "UV-Index": hourly.Variables(11).ValuesAsNumpy().round(3)
     }
     return pd.DataFrame(data = hourly_data)
 
@@ -101,12 +103,13 @@ hat_regen = df_zukunft["Regen (mm)"].sum() > 0.5
 hat_schnee = df_zukunft["Schneefall (mm)"].max() > 0.1
 starker_wind = df_zukunft["Windböen (km/h)"].max() > 40
 glaette_gefahr = df_zukunft["Bodentemperatur (°C)"].min() <= 0
+uv_gefahr = df_zukunft["UV-Index"].max()
 
 st.write("---")
 st.subheader("Ausblick & Warnungen (nächste 48h)")
 
 # icons und texte basierend auf der Logik
-warn_cols = st.columns(3)
+warn_cols = st.columns(4)
 
 with warn_cols[0]:
     if hat_regen:
@@ -132,6 +135,22 @@ with warn_cols[2]:
         wind_max = str(df_zukunft['Windböen (km/h)'].max().round(2))[0:4]
         st.success(f"🍃 Kein Sturm, Windgeschwindigkeiten bis {wind_max} km/h erwartet.")
 
+with warn_cols[3]:
+    if uv_gefahr < 3:
+        st.warning(f"☁️ UV-Index unter 3, keine Sonnenbrandgefahr.")
+    elif uv_gefahr >=3 and uv_gefahr <= 5:
+        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
+        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Mäßige Sonnenbrandgefahr.")
+    elif uv_gefahr >=6 and uv_gefahr <= 7:
+        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
+        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Starke Sonnenbrandgefahr!")
+    elif uv_gefahr >=8 and uv_gefahr <= 10:
+        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
+        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Sehr starke Sonnenbrandgefahr!")
+    elif uv_gefahr >10:
+        uv_max = str(df_zukunft['UV-Index'].max().round(2))[0:2]
+        st.warning(f" ☀️ UV-Index von {uv_max} erwartet. Extreme Sonnenbrandgefahr!")
+
 st.write("---")
 
 
@@ -141,9 +160,9 @@ st.subheader("Wetterverlauf (nächste 48h)")
 # 1. TEMPERATUR & FEUCHTIGKEIT
 fig1 = make_subplots(specs=[[{"secondary_y": True}]])
 
-fig1.add_trace(go.Scatter(x=df['date'], y=df['Temperatur (°C)'], name="Temperatur (°C)", line=dict(color="red")), secondary_y=False)
-fig1.add_trace(go.Scatter(x=df['date'], y=df['Bodentemperatur (°C)'], name="Bodentemperatur (0cm)", line=dict(color="orange", dash='dash')), secondary_y=False)
-fig1.add_trace(go.Scatter(x=df['date'], y=df['Feuchtigkeit (%)'], name="rel. Feuchte (%)", line=dict(color="blue", width=1)), secondary_y=True)
+fig1.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Temperatur (°C)'], name="Temperatur (°C)", line=dict(color="red")), secondary_y=False)
+fig1.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Bodentemperatur (°C)'], name="Bodentemperatur (0cm)", line=dict(color="orange", dash='dash')), secondary_y=False)
+fig1.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Feuchtigkeit (%)'], name="rel. Feuchte (%)", line=dict(color="blue", width=1)), secondary_y=True)
 
 fig1.update_layout(title_text="Temperatur vs. Luftfeuchtigkeit")
 fig1.update_yaxes(title_text="Temperatur (°C)", secondary_y=False)
@@ -152,24 +171,31 @@ st.plotly_chart(fig1, use_container_width=True)
 
 # 2. WIND (Linie, Böen & Richtung)
 fig2 = go.Figure()
-fig2.add_trace(go.Scatter(x=df['date'], y=df['Windgeschwindigkeit (km/h)'], name="Windgeschwindigkeit", line=dict(color="green")))
-fig2.add_trace(go.Scatter(x=df['date'], y=df['Windböen (km/h)'], name="Windböen", line=dict(color="lightgreen", width=1)))
+fig2.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Windgeschwindigkeit (km/h)'], name="Windgeschwindigkeit", line=dict(color="green")))
+fig2.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Windböen (km/h)'], name="Windböen", line=dict(color="lightgreen", width=1)))
 # windrichtung als punkte auf der windgeschwindigkeit
-fig2.add_trace(go.Scatter(x=df['date'], y=df['Windgeschwindigkeit (km/h)'], name="Windrichtung (°)", mode='markers', marker=dict(symbol='arrow', angle=df['Windrichtung (°)'], size=10)))
+fig2.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Windgeschwindigkeit (km/h)'], name="Windrichtung (°)", mode='markers', marker=dict(symbol='arrow', angle=df_zukunft['Windrichtung (°)'], size=10)))
 
 fig2.update_layout(title="Wind (Geschwindigkeit & Böen in km/h)")
 st.plotly_chart(fig2, use_container_width=True)
 
 # 3. NIEDERSCHLAG & SCHNEEHÖHE
 fig3 = make_subplots(specs=[[{"secondary_y": True}]])
-fig3.add_trace(go.Bar(x=df['date'], y=df['Regen (mm)'], name="Regen (mm)", marker_color='green'), secondary_y=False)
-fig3.add_trace(go.Bar(x=df['date'], y=df['Schneefall (mm)'], name="Schnee (mm)", marker_color='royalblue'), secondary_y=False)
-fig3.add_trace(go.Scatter(x=df['date'], y=df['Schneehöhe (cm)'], name="Schneehöhe (cm)", line=dict(color="lightblue")), secondary_y=True)
+fig3.add_trace(go.Bar(x=df_zukunft['date'], y=df_zukunft['Regen (mm)'], name="Regen (mm)", marker_color='green'), secondary_y=False)
+fig3.add_trace(go.Bar(x=df_zukunft['date'], y=df_zukunft['Schneefall (mm)'], name="Schnee (mm)", marker_color='royalblue'), secondary_y=False)
+fig3.add_trace(go.Scatter(x=df_zukunft['date'], y=df_zukunft['Schneehöhe (cm)'], name="Schneehöhe (cm)", line=dict(color="lightblue")), secondary_y=True)
 
 fig3.update_layout(title="Niederschlag & Schneehöhe")
 st.plotly_chart(fig3, use_container_width=True)
 
-# 4. LUFTDRUCK (Separate Linie)
-fig4 = px.line(df, x="date", y="Luftdruck (hPa)", title="Luftdruck (hPa)", labels={"Luftdruck (hPa)": "hPa"})
-fig4.update_traces(line_color='purple')
+# 4. SOLARSTRAHLUNG & UV
+fig4 = make_subplots(specs=[[{"secondary_y": True}]])
+fig4.add_trace(go.Bar(x=df_zukunft['date'], y=df_zukunft['Solarstrahlung (W/m2)'], name="Solarstrahlung (W/m2)", marker_color='yellow'), secondary_y=False)
+fig4.add_trace(go.Bar(x=df_zukunft['date'], y=df_zukunft['UV-Index'], name="UV-Index", marker_color='red'), secondary_y=True)
+fig4.update_layout(title="Solarstrahlung & UV")
 st.plotly_chart(fig4, use_container_width=True)
+
+# 5. LUFTDRUCK
+fig5 = px.line(df_zukunft, x="date", y="Luftdruck (hPa)", title="Luftdruck (hPa)", labels={"Luftdruck (hPa)": "hPa"})
+fig5.update_traces(line_color='purple')
+st.plotly_chart(fig5, use_container_width=True)
