@@ -66,7 +66,7 @@ def get_weather_data(lat, lon):
         "Bodentemperatur (°C)": hourly.Variables(8).ValuesAsNumpy().round(3),
         "Schneefall (mm)": hourly.Variables(9).ValuesAsNumpy().round(3),
         "Solarstrahlung (W/m2)" : hourly.Variables(10).ValuesAsNumpy().round(3),
-        "UV-Index": (hourly.Variables(10).ValuesAsNumpy() / 90).round(1),
+        "UV-Index": (hourly.Variables(10).ValuesAsNumpy() / 120).round(1),
         "Wolkenbedeckung (%)" : hourly.Variables(11).ValuesAsNumpy().round(3),
         "Tag/Nacht" : hourly.Variables(12).ValuesAsNumpy().round(3)
     }
@@ -278,4 +278,5 @@ st.plotly_chart(fig4, use_container_width=True)
 # 5. LUFTDRUCK
 fig5 = px.line(df_zukunft, x="date", y="Luftdruck (hPa)", title="Luftdruck (hPa)", labels={"Luftdruck (hPa)": "hPa"})
 fig5.update_traces(line_color='purple')
+
 st.plotly_chart(fig5, use_container_width=True)
